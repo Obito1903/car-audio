@@ -108,9 +108,6 @@ async fn confirm(req: RequestConfirmation) -> Result<(), ReqError> {
 }
 
 async fn save_settings(settings: &Settings) -> bluer::Result<()> {
-    if let Some(dir) = dirs::config_dir() {
-        std::fs::create_dir_all(dir.join("bluer"))?;
-    }
     let yaml = serde_yaml::to_string(settings).unwrap();
     std::fs::write(dirs::config_dir().unwrap().join("bluer/config.yaml"), yaml)?;
     Ok(())
@@ -118,11 +115,15 @@ async fn save_settings(settings: &Settings) -> bluer::Result<()> {
 
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> bluer::Result<()> {
+    if let Some(dir) = dirs::config_dir() {
+        std::fs::create_dir_all(dir.join("bluer"))?;
+        save_settings(&Settings::default()).await?;
+    }
     let mut settings = Figment::new()
         .merge(Yaml::file(
             dirs::config_dir().unwrap().join("bluer/config.yaml"),
         ))
-        .merge(Yaml::file("config.yaml"))
+        // .merge(Yaml::file("config.yaml"))
         .extract::<Settings>()
         .unwrap();
 
