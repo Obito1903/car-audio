@@ -36,6 +36,15 @@ struct Settings {
     devices: Vec<MacAddress>,
 }
 
+impl Default for Settings {
+    fn default() -> Self {
+        Self {
+            name: None,
+            devices: Vec::new(),
+        }
+    }
+}
+
 async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
     let device = adapter.device(addr)?;
     println!("    Address type:       {}", device.address_type().await?);
