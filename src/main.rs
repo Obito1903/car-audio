@@ -89,7 +89,9 @@ async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Resu
         let device = adapter.device(addr)?;
         match device.is_paired().await {
             Ok(_) => {
-                device.set_trusted(true).await?;
+                println!("Device found: {}", saved_device);
+                // device.set_trusted(true).await?;
+                println!("Device connecting...");
                 device.connect().await?;
                 return Ok(());
             }
