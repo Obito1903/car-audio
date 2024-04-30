@@ -6,12 +6,12 @@ use bluer::{
         AuthorizeService, ReqError, ReqResult, RequestConfirmation, RequestPasskey, RequestPinCode,
     },
     id::ServiceClass,
-    Adapter, AdapterEvent, Address, DeviceEvent, DiscoveryFilter, DiscoveryTransport, Error, Uuid,
+    Adapter, AdapterEvent, Address, DeviceEvent, DiscoveryFilter, DiscoveryTransport, Uuid,
 };
 use clap::{arg, Parser};
 use core::fmt;
 use figment::{
-    providers::{Format, Yaml},
+    providers::{Format, Serialized, Yaml},
     Figment,
 };
 use futures::{pin_mut, stream::SelectAll, Future, StreamExt};
@@ -28,6 +28,11 @@ use std::{
 };
 use tokio::signal::ctrl_c;
 
+#[derive(Debug)]
+struct Error {
+    message: String,
+}
+
 #[derive(serde::Deserialize, serde::Serialize, Parser, Clone, Debug)]
 #[command(version, about, long_about=None)]
 struct Settings {
@@ -41,6 +46,14 @@ impl Default for Settings {
         Self {
             name: None,
             devices: Vec::new(),
+        }
+    }
+}
+
+impl From<bluer::Error> for Error {
+    fn from(e: bluer::Error) -> Self {
+        Self {
+            message: format!("{}", e),
         }
     }
 }
@@ -74,10 +87,18 @@ async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Resu
         // Parse string to Address
         let addr = Address(saved_device.bytes());
         let device = adapter.device(addr)?;
-        if device.is_paired().await? {
-            device.set_trusted(true).await?;
-            device.connect().await?;
-            return Ok(());
+        match device.is_paired().await {
+            Ok(_) => {
+                device.set_trusted(true).await?;
+                device.connect().await?;
+                return Ok(());
+            }
+            Err(_) => {
+                println!("Device not found: {}", saved_device);
+                let mut settings = settings.clone();
+                settings.devices.retain(|d| d != saved_device);
+                save_settings(&settings).await?;
+            }
         }
     }
     // Err(Error::)
@@ -107,6 +128,10 @@ async fn confirm(req: RequestConfirmation) -> Result<(), ReqError> {
     Ok(())
 }
 
+fn config_exists() -> bool {
+    dirs::config_dir().map_or(false, |dir| dir.join("bluer/config.yaml").exists())
+}
+
 async fn save_settings(settings: &Settings) -> bluer::Result<()> {
     let yaml = serde_yaml::to_string(settings).unwrap();
     std::fs::write(dirs::config_dir().unwrap().join("bluer/config.yaml"), yaml)?;
@@ -114,15 +139,22 @@ async fn save_settings(settings: &Settings) -> bluer::Result<()> {
 }
 
 #[tokio::main(flavor = "current_thread")]
-async fn main() -> bluer::Result<()> {
-    if let Some(dir) = dirs::config_dir() {
-        std::fs::create_dir_all(dir.join("bluer"))?;
+async fn main() -> Result<(), Error> {
+    if !config_exists() {
+        std::fs::create_dir_all(dirs::config_dir().unwrap().join("bluer")).map_err(|e| Error {
+            message: format!("Failed to create config directory: {}", e),
+        })?;
         save_settings(&Settings::default()).await?;
     }
+    println!(
+        "{:?}",
+        dirs::config_dir().unwrap().join("bluer/config.yaml")
+    );
     let mut settings = Figment::new()
         .merge(Yaml::file(
             dirs::config_dir().unwrap().join("bluer/config.yaml"),
         ))
+        // .merge(Serialized::defaults(Settings::parse()))
         // .merge(Yaml::file("config.yaml"))
         .extract::<Settings>()
         .unwrap();
@@ -143,7 +175,9 @@ async fn main() -> bluer::Result<()> {
         })
         .await?;
 
-    let adapter = Arc::new(session.default_adapter().await?);
+    let adapter = Arc::new(session.default_adapter().await.map_err(|e| Error {
+        message: format!("Failed to get default adapter: {}", e),
+    })?);
     if let Some(name) = settings.name.clone() {
         adapter.set_alias(name).await?;
     }
@@ -154,7 +188,6 @@ async fn main() -> bluer::Result<()> {
     adapter.set_discoverable_timeout(0).await?;
     adapter.set_pairable(true).await?;
     adapter.set_pairable_timeout(0).await?;
-    adapter.class().await?;
 
     let events = adapter.events().await?;
     pin_mut!(events);
@@ -169,26 +202,53 @@ async fn main() -> bluer::Result<()> {
         exit(0)
     });
 
+    let mut connected_device: Option<Address> = None;
+
     loop {
         tokio::select! {
             Some(adapter_event) = events.next() => {
                 match adapter_event {
                     AdapterEvent::DeviceAdded(addr) => {
-                        println!("Device added: {addr}");
-                        // println!("Trusting device...");
                         let device = adapter.device(addr)?;
+                        query_device(&adapter, addr).await?;
+                        println!("Device detected: {} {:?}", addr, device.name().await?);
+                        // println!("Trusting device...");
+                        // if settings.devices.contains(&MacAddress::new(addr.0)) && !device.is_connected().await? {
+                        //     println!("Device is in auto-connect list, attempting to connect...");
+                        //     device.connect().await?;
+                        //     println!("Device connected");
+                        //     connected_device = Some(addr);
+
+                        // }
                         if device.is_paired().await? {
+                            // query_device(&adapter, addr).await?;
+                            // println!("Device is paired");
                             device.set_trusted(true).await?;
+                            // println!("Device trusted, connecting...");
                             if !settings.devices.contains(&MacAddress::new(addr.0)) {
+                                println!("Device paired, Adding device to auto-connect...");
                                 settings.devices.push(MacAddress::new(addr.0));
                                 save_settings(&settings).await?;
+                                println!("Device added to auto-connect list");
+                                device.connect().await?;
+                                println!("Device connected");
                             }
                         }
-                        query_device(&adapter, addr).await?;
-                    }
+                    },
+                    AdapterEvent::DeviceRemoved(addr) => {
+                        println!("Device removed: {}", addr);
+                        if let Some(device_addr) = connected_device {
+                            if device_addr == addr {
+                                connected_device = None;
+                                adapter.set_discoverable(true).await?;
+                                adapter.set_discoverable_timeout(0).await?;
+                                adapter.set_pairable(true).await?;
+                                adapter.set_pairable_timeout(0).await?;
+                            }
+                        }
+                    },
                     _ => (),
                 }
-                println!();
             }
             else => break
         }
