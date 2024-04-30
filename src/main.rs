@@ -154,7 +154,7 @@ async fn main() -> Result<(), Error> {
         .merge(Yaml::file(
             dirs::config_dir().unwrap().join("bluer/config.yaml"),
         ))
-        // .merge(Serialized::defaults(Settings::parse()))
+        .merge(Serialized::defaults(Settings::parse()))
         // .merge(Yaml::file("config.yaml"))
         .extract::<Settings>()
         .unwrap();
