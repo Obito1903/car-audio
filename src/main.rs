@@ -8,6 +8,7 @@ use bluer::{
     id::ServiceClass,
     Adapter, AdapterEvent, Address, DeviceEvent, DiscoveryFilter, DiscoveryTransport, Error, Uuid,
 };
+use clap::{arg, Parser};
 use core::fmt;
 use figment::{
     providers::{Format, Yaml},
@@ -15,10 +16,23 @@ use figment::{
 };
 use futures::{pin_mut, stream::SelectAll, Future, StreamExt};
 use mac_address::MacAddress;
-use std::{alloc::Global, collections::HashSet, env, pin::Pin, str::FromStr};
+use serde::de::MapAccess;
+use std::{
+    alloc::Global,
+    collections::HashSet,
+    env,
+    pin::Pin,
+    process::{exit, ExitCode},
+    str::FromStr,
+    sync::Arc,
+};
+use tokio::signal::ctrl_c;
 
-#[derive(serde::Deserialize, Clone, Debug)]
+#[derive(serde::Deserialize, serde::Serialize, Parser, Clone, Debug)]
+#[command(version, about, long_about=None)]
 struct Settings {
+    #[arg(long)]
+    name: Option<String>,
     devices: Vec<MacAddress>,
 }
 
@@ -84,9 +98,21 @@ async fn confirm(req: RequestConfirmation) -> Result<(), ReqError> {
     Ok(())
 }
 
+async fn save_settings(settings: &Settings) -> bluer::Result<()> {
+    if let Some(dir) = dirs::config_dir() {
+        std::fs::create_dir_all(dir.join("bluer"))?;
+    }
+    let yaml = serde_yaml::to_string(settings).unwrap();
+    std::fs::write(dirs::config_dir().unwrap().join("bluer/config.yaml"), yaml)?;
+    Ok(())
+}
+
 #[tokio::main(flavor = "current_thread")]
 async fn main() -> bluer::Result<()> {
-    let settings = Figment::new()
+    let mut settings = Figment::new()
+        .merge(Yaml::file(
+            dirs::config_dir().unwrap().join("bluer/config.yaml"),
+        ))
         .merge(Yaml::file("config.yaml"))
         .extract::<Settings>()
         .unwrap();
@@ -107,8 +133,11 @@ async fn main() -> bluer::Result<()> {
         })
         .await?;
 
-    let adapter = session.default_adapter().await?;
-    adapter.set_alias(String::from("car-test1")).await?;
+    let adapter = Arc::new(session.default_adapter().await?);
+    if let Some(name) = settings.name.clone() {
+        adapter.set_alias(name).await?;
+    }
+    // adapter.set_alias(String::from("car-test1")).await?;
     adapter.set_powered(true).await?;
 
     adapter.set_discoverable(true).await?;
@@ -122,6 +151,14 @@ async fn main() -> bluer::Result<()> {
 
     reconnect_device(&settings, &adapter).await?;
 
+    let adapter_ref = adapter.clone();
+
+    tokio::spawn(async move {
+        tokio::signal::ctrl_c().await.unwrap();
+        adapter_ref.set_powered(false).await.unwrap();
+        exit(0)
+    });
+
     loop {
         tokio::select! {
             Some(adapter_event) = events.next() => {
@@ -132,7 +169,10 @@ async fn main() -> bluer::Result<()> {
                         let device = adapter.device(addr)?;
                         if device.is_paired().await? {
                             device.set_trusted(true).await?;
-
+                            if !settings.devices.contains(&MacAddress::new(addr.0)) {
+                                settings.devices.push(MacAddress::new(addr.0));
+                                save_settings(&settings).await?;
+                            }
                         }
                         query_device(&adapter, addr).await?;
                     }
