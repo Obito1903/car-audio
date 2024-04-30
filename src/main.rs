@@ -93,6 +93,7 @@ async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Resu
                 // device.set_trusted(true).await?;
                 println!("Device connecting...");
                 device.connect().await?;
+                println!("Device connected");
                 return Ok(());
             }
             Err(_) => {
