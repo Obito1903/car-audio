@@ -269,13 +269,16 @@ async fn main() -> Result<(), Error> {
                                 println!("Device added to auto-connect list");
                                 device.connect().await?;
                                 println!("Device connected");
-                            }
-                            if device.is_connected().await? {
-                                println!("Device connected");
                                 connected_device = Some(addr);
                                 adapter.set_discoverable(false).await?;
                                 adapter.set_pairable(false).await?;
                             }
+                        }
+                        if device.is_connected().await? {
+                            println!("Device connected");
+                            connected_device = Some(addr);
+                            adapter.set_discoverable(false).await?;
+                            adapter.set_pairable(false).await?;
                         }
                     },
                     AdapterEvent::DeviceRemoved(addr) => {
