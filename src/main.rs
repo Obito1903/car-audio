@@ -2,7 +2,10 @@
 //! Discover Bluetooth devices and list them.
 
 use bluer::{
-    agent::{AuthorizeService, ReqError, RequestConfirmation},
+    agent::{
+        AuthorizeService, DisplayPasskey, DisplayPinCode, ReqError, RequestAuthorization,
+        RequestConfirmation, RequestPasskey, RequestPinCode,
+    },
     id::ServiceClass,
     Adapter, AdapterEvent, Address,
 };
@@ -122,6 +125,31 @@ async fn confirm(req: RequestConfirmation) -> Result<(), ReqError> {
     Ok(())
 }
 
+async fn confirm_pin(req: RequestPinCode) -> Result<std::string::String, ReqError> {
+    println!("Confirm: {:?}", req);
+    Ok("1234".to_string())
+}
+
+async fn display_pin(req: DisplayPinCode) -> Result<(), ReqError> {
+    println!("Display: {:?}", req);
+    Ok(())
+}
+
+async fn confirm_passkey(req: RequestPasskey) -> Result<u32, ReqError> {
+    println!("Confirm: {:?}", req);
+    Ok(1234)
+}
+
+async fn display_passkey(req: DisplayPasskey) -> Result<(), ReqError> {
+    println!("Display: {:?}", req);
+    Ok(())
+}
+
+async fn confirm_auth(req: RequestAuthorization) -> Result<(), ReqError> {
+    println!("Confirm: {:?}", req);
+    Ok(())
+}
+
 fn config_exists() -> bool {
     dirs::config_dir().map_or(false, |dir| dir.join("bluer/config.yaml").exists())
 }
@@ -158,12 +186,12 @@ async fn main() -> Result<(), Error> {
     let _agent = session
         .register_agent(bluer::agent::Agent {
             request_default: true,
-            request_pin_code: None,
-            display_pin_code: None,
-            request_passkey: None,
-            display_passkey: None,
+            request_pin_code: None, // Some(Box::new(|req| Box::pin(confirm_pin(req)))),
+            display_pin_code: Some(Box::new(|req| Box::pin(display_pin(req)))),
+            request_passkey: None, // Some(Box::new(|req| Box::pin(confirm_passkey(req)))),
+            display_passkey: Some(Box::new(|req| Box::pin(display_passkey(req)))),
             request_confirmation: Some(Box::new(|req| Box::pin(confirm(req)))),
-            request_authorization: None,
+            request_authorization: Some(Box::new(|req| Box::pin(confirm_auth(req)))),
             authorize_service: Some(Box::new(|auth| Box::pin(authorize_service(auth)))),
             _non_exhaustive: (),
         })
@@ -241,6 +269,12 @@ async fn main() -> Result<(), Error> {
                                 println!("Device added to auto-connect list");
                                 device.connect().await?;
                                 println!("Device connected");
+                            }
+                            if device.is_connected().await? {
+                                println!("Device connected");
+                                connected_device = Some(addr);
+                                adapter.set_discoverable(false).await?;
+                                adapter.set_pairable(false).await?;
                             }
                         }
                     },
