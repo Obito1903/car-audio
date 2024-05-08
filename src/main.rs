@@ -232,7 +232,7 @@ async fn main() -> Result<(), Error> {
     let events = adapter.events().await?;
     pin_mut!(events);
 
-    let mut connected_device = reconnect_device(&settings, &adapter).await?;
+    let mut connected_device = reconnect_device(&settings, &adapter).await.unwrap_or(None);
 
     let adapter_ref = adapter.clone();
 
