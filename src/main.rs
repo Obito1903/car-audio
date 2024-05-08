@@ -90,8 +90,6 @@ async fn reconnect_device(
                 println!("Device connecting...");
                 device.connect().await?;
                 println!("Device connected");
-                adapter.set_discoverable(false).await?;
-                adapter.set_pairable(false).await?;
                 return Ok(Some(addr));
             }
             Err(_) => {
@@ -275,15 +273,11 @@ async fn main() -> Result<(), Error> {
                                 device.connect().await?;
                                 println!("Device connected");
                                 connected_device = Some(addr);
-                                adapter.set_discoverable(false).await?;
-                                adapter.set_pairable(false).await?;
                             }
                         }
                         if device.is_connected().await? {
                             println!("Device connected");
                             connected_device = Some(addr);
-                            adapter.set_discoverable(false).await?;
-                            adapter.set_pairable(false).await?;
                         }
                     },
                     AdapterEvent::DeviceRemoved(addr) => {
