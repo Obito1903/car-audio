@@ -87,6 +87,8 @@ async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Resu
                 println!("Device connecting...");
                 device.connect().await?;
                 println!("Device connected");
+                adapter.set_discoverable(false).await?;
+                adapter.set_pairable(false).await?;
                 return Ok(());
             }
             Err(_) => {
