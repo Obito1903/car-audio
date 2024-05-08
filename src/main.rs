@@ -39,6 +39,8 @@ struct Settings {
     #[arg(long)]
     name: Option<String>,
     devices: Vec<MacAddress>,
+    #[arg(long)]
+    adapter: Option<String>,
 }
 
 impl Default for Settings {
@@ -46,6 +48,7 @@ impl Default for Settings {
         Self {
             name: None,
             devices: Vec::new(),
+            adapter: None,
         }
     }
 }
@@ -179,9 +182,24 @@ async fn main() -> Result<(), Error> {
         })
         .await?;
 
-    let adapter = Arc::new(session.default_adapter().await.map_err(|e| Error {
-        message: format!("Failed to get default adapter: {}", e),
-    })?);
+    let adapter: Arc<Adapter>;
+    if let Some(ad_name) = settings.adapter.clone() {
+        if ad_name == "?" {
+            let adapters = session.adapter_names().await?;
+            for adapter in adapters {
+                println!("{}", adapter);
+            }
+            return Ok(());
+        }
+        adapter = Arc::new(session.adapter(&ad_name).map_err(|e| Error {
+            message: format!("Failed to get adapter: {}", e),
+        })?);
+    } else {
+        adapter = Arc::new(session.default_adapter().await.map_err(|e| Error {
+            message: format!("Failed to get default adapter: {}", e),
+        })?);
+    }
+
     if let Some(name) = settings.name.clone() {
         adapter.set_alias(name).await?;
     }
