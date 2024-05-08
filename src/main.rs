@@ -2,31 +2,18 @@
 //! Discover Bluetooth devices and list them.
 
 use bluer::{
-    agent::{
-        AuthorizeService, ReqError, ReqResult, RequestConfirmation, RequestPasskey, RequestPinCode,
-    },
+    agent::{AuthorizeService, ReqError, RequestConfirmation},
     id::ServiceClass,
-    Adapter, AdapterEvent, Address, DeviceEvent, DiscoveryFilter, DiscoveryTransport, Uuid,
+    Adapter, AdapterEvent, Address,
 };
 use clap::{arg, Parser};
-use core::fmt;
 use figment::{
     providers::{Format, Serialized, Yaml},
     Figment,
 };
-use futures::{pin_mut, stream::SelectAll, Future, StreamExt};
+use futures::{pin_mut, StreamExt};
 use mac_address::MacAddress;
-use serde::de::MapAccess;
-use std::{
-    alloc::Global,
-    collections::HashSet,
-    env,
-    pin::Pin,
-    process::{exit, ExitCode},
-    str::FromStr,
-    sync::Arc,
-};
-use tokio::signal::ctrl_c;
+use std::{process::exit, sync::Arc};
 
 #[derive(Debug)]
 struct Error {
