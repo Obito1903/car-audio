@@ -75,7 +75,10 @@ async fn query_device(adapter: &Adapter, addr: Address) -> bluer::Result<()> {
     Ok(())
 }
 
-async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Result<()> {
+async fn reconnect_device(
+    settings: &Settings,
+    adapter: &Adapter,
+) -> Result<Option<Address>, Error> {
     for saved_device in settings.devices.iter() {
         // Parse string to Address
         let addr = Address(saved_device.bytes());
@@ -89,7 +92,7 @@ async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Resu
                 println!("Device connected");
                 adapter.set_discoverable(false).await?;
                 adapter.set_pairable(false).await?;
-                return Ok(());
+                return Ok(Some(addr));
             }
             Err(_) => {
                 println!("Device not found: {}", saved_device);
@@ -101,7 +104,7 @@ async fn reconnect_device(settings: &Settings, adapter: &Adapter) -> bluer::Resu
     }
     println!("No devices found in auto-connect list");
     // Err(Error::)
-    Ok(())
+    Ok(None)
 }
 
 async fn authorize_service(auth: AuthorizeService) -> Result<(), ReqError> {
@@ -231,7 +234,7 @@ async fn main() -> Result<(), Error> {
     let events = adapter.events().await?;
     pin_mut!(events);
 
-    reconnect_device(&settings, &adapter).await?;
+    let mut connected_device = reconnect_device(&settings, &adapter).await?;
 
     let adapter_ref = adapter.clone();
 
@@ -241,7 +244,7 @@ async fn main() -> Result<(), Error> {
         exit(0)
     });
 
-    let mut connected_device: Option<Address> = None;
+    // let mut connected_device: Option<Address> = None;
 
     loop {
         tokio::select! {
@@ -295,7 +298,9 @@ async fn main() -> Result<(), Error> {
                             }
                         }
                     },
-                    _ => (),
+                    AdapterEvent::PropertyChanged(property) => {
+                        println!("Property changed: {:?}", property);
+                    },
                 }
             }
             else => break
